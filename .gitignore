@@ -1,0 +1,72 @@
+# Build directories
+build/
+cmake-build-*/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Data and databases
+*.db
+*.sqlite
+*.sqlite3
+data/
+*.csv
+*.parquet
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+.env.local
+
+# API keys
+config/keys.json
+config/secrets.json
+
+# Generated protobuf files
+*.pb.cc
+*.pb.h
+*.grpc.pb.cc
+*.grpc.pb.h
+
+# Test output
+test_output/
+coverage/
+
+# FAISS indices
+*.index
+*.faiss
+
+# Docker
+.dockerignore
+

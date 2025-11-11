@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package rag.agent;
+
+// Service definition for RAG Agent
+service RAGAgentService {
+  // Get stock summary with context
+  rpc GetStockSummary(StockSummaryRequest) returns (StockSummaryResponse);
+  
+  // Explain volatility spike
+  rpc ExplainVolatility(VolatilityRequest) returns (VolatilityResponse);
+  
+  // Compare sentiment between two tickers
+  rpc CompareSentiment(SentimentCompareRequest) returns (SentimentCompareResponse);
+  
+  // Recommend long/short pair
+  rpc RecommendPair(PairRecommendationRequest) returns (PairRecommendationResponse);
+  
+  // General query with RAG
+  rpc QueryRAG(QueryRequest) returns (QueryResponse);
+}
+
+// Stock Summary Request
+message StockSummaryRequest {
+  string symbol = 1;
+  string period = 2;  // e.g., "1d", "1w", "1m", "1y"
+  int32 max_context_docs = 3;
+}
+
+// Stock Summary Response
+message StockSummaryResponse {
+  string symbol = 1;
+  double current_price = 2;
+  double change_percent = 3;
+  double volume = 4;
+  string summary = 5;
+  repeated ContextDoc context_docs = 6;
+  string timestamp = 7;
+}
+
+// Volatility Request
+message VolatilityRequest {
+  string symbol = 1;
+  string date = 2;  // ISO format: YYYY-MM-DD
+  int32 lookback_days = 3;
+}
+
+// Volatility Response
+message VolatilityResponse {
+  string symbol = 1;
+  string date = 2;
+  double volatility_value = 3;
+  double previous_volatility = 4;
+  string explanation = 5;
+  repeated ContextDoc context_docs = 6;
+}
+
+// Sentiment Compare Request
+message SentimentCompareRequest {
+  string ticker1 = 1;
+  string ticker2 = 2;
+  string period = 3;
+}
+
+// Sentiment Compare Response
+message SentimentCompareResponse {
+  string ticker1 = 1;
+  string ticker2 = 2;
+  double sentiment1 = 3;
+  double sentiment2 = 4;
+  string comparison = 5;
+  repeated ContextDoc context_docs = 6;
+}
+
+// Pair Recommendation Request
+message PairRecommendationRequest {
+  string sector = 1;
+  int32 max_candidates = 2;
+}
+
+// Pair Recommendation Response
+message PairRecommendationResponse {
+  string long_ticker = 1;
+  string short_ticker = 2;
+  string reasoning = 3;
+  double correlation = 4;
+  double expected_return = 5;
+  repeated ContextDoc context_docs = 6;
+}
+
+// General Query Request
+message QueryRequest {
+  string query = 1;
+  int32 max_context_docs = 2;
+  repeated string symbols = 3;
+}
+
+// General Query Response
+message QueryResponse {
+  string answer = 1;
+  repeated ContextDoc context_docs = 2;
+  double confidence = 3;
+  string timestamp = 4;
+}
+
+// Context Document (retrieved from vector store)
+message ContextDoc {
+  string doc_id = 1;
+  string content = 2;
+  string source = 3;
+  string timestamp = 4;
+  double similarity_score = 5;
+  map<string, string> metadata = 6;
+}
+
