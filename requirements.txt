@@ -1,0 +1,6 @@
+# Python dependencies for RAG Quant Trading Agent
+requests>=2.32.0
+grpcio>=1.76.0
+grpcio-tools>=1.76.0
+protobuf>=6.33.0
+

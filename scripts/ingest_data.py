@@ -6,7 +6,7 @@ Data ingestion script to fetch and store market data using Alpha Vantage API.
 import os
 import sys
 import sqlite3
-import requests
+import requests  # type: ignore
 import json
 import argparse
 from datetime import datetime, timedelta
