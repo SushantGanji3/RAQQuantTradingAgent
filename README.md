@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # RAG Quant Trading Agent
 
 A Retrieval-Augmented Generation (RAG) agent that connects live and historical market data (stocks, options, fundamentals) with a large language model (LLM) to produce context-aware trading insights.
@@ -457,3 +458,6 @@ For questions or issues, please open an issue on GitHub.
 - [FAISS Documentation](https://github.com/facebookresearch/faiss)
 - [gRPC Documentation](https://grpc.io/docs/)
 
+=======
+# RAQQuantTradingAgent
+>>>>>>> 45c6309bf0c1b44cc91af3082b8dd1e2ad86e76e
