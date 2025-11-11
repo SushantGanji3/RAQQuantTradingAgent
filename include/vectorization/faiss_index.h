@@ -4,8 +4,23 @@
 #include <vector>
 #include <memory>
 #include <map>
+
+#ifdef NO_FAISS
+// Stub definitions when FAISS is not available
+namespace faiss {
+    class IndexFlatL2 {
+    public:
+        IndexFlatL2(int d) {}
+        void add(int n, const float* x) {}
+        void search(int n, const float* x, int k, float* distances, long* labels) const {}
+        int ntotal = 0;
+    };
+    typedef long idx_t;
+}
+#else
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexIVFFlat.h>
+#endif
 
 namespace rag {
 namespace vectorization {
@@ -72,4 +87,3 @@ private:
 
 } // namespace vectorization
 } // namespace rag
-

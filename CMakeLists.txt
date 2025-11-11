@@ -21,25 +21,44 @@ find_package(nlohmann_json REQUIRED)
 find_library(SQLITE3_LIB sqlite3)
 find_path(SQLITE3_INCLUDE sqlite3.h)
 
-# DuckDB
-find_package(duckdb CONFIG)
+# DuckDB (optional)
+find_package(duckdb CONFIG QUIET)
 
 # gRPC
 find_package(Protobuf REQUIRED)
 find_package(gRPC REQUIRED)
-find_package(absl REQUIRED)
 
-# FAISS (assuming installed via vcpkg or system)
-find_path(FAISS_INCLUDE faiss/Index.h)
-find_library(FAISS_LIB faiss)
+# Abseil (optional, often included with gRPC)
+find_package(abseil QUIET)
+if(NOT abseil_FOUND)
+    message(STATUS "Abseil not found, continuing without it")
+endif()
+
+# FAISS (optional - can be installed separately)
+find_path(FAISS_INCLUDE faiss/Index.h QUIET)
+find_library(FAISS_LIB faiss QUIET)
+
+# Check if FAISS is available
+if(NOT FAISS_INCLUDE OR NOT FAISS_LIB OR FAISS_INCLUDE MATCHES "NOTFOUND" OR FAISS_LIB MATCHES "NOTFOUND")
+    message(WARNING "FAISS not found. Building without FAISS support. Install FAISS for vector search functionality.")
+    add_definitions(-DNO_FAISS)
+    set(FAISS_AVAILABLE FALSE)
+else()
+    set(FAISS_AVAILABLE TRUE)
+    message(STATUS "FAISS found: ${FAISS_INCLUDE}")
+endif()
 
 # Include directories
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${SQLITE3_INCLUDE}
-    ${FAISS_INCLUDE}
     ${CURL_INCLUDE_DIRS}
 )
+
+# Add FAISS include if found
+if(FAISS_AVAILABLE)
+    include_directories(${FAISS_INCLUDE})
+endif()
 
 # Source files
 set(SOURCES
@@ -50,16 +69,6 @@ set(SOURCES
     src/rag/rag_agent.cpp
     src/api/grpc_server.cpp
     src/utils/logger.cpp
-)
-
-set(HEADERS
-    include/data_ingestion/data_fetcher.h
-    include/data_ingestion/database.h
-    include/vectorization/embedding_service.h
-    include/vectorization/faiss_index.h
-    include/rag/rag_agent.h
-    include/api/grpc_server.h
-    include/utils/logger.h
 )
 
 # Protobuf files
@@ -92,7 +101,6 @@ include_directories(${PROTO_GEN_DIR})
 # Main library
 add_library(rag_agent_lib
     ${SOURCES}
-    ${HEADERS}
     ${PROTO_GEN_DIR}/rag_service.pb.cc
     ${PROTO_GEN_DIR}/rag_service.grpc.pb.cc
 )
@@ -102,14 +110,24 @@ target_link_libraries(rag_agent_lib
         ${CURL_LIBRARIES}
         nlohmann_json::nlohmann_json
         ${SQLITE3_LIB}
-        duckdb::duckdb
-        ${FAISS_LIB}
         gRPC::grpc++
         protobuf::libprotobuf
-        absl::base
-        absl::strings
         Threads::Threads
 )
+
+# Add Abseil if found
+if(abseil_FOUND)
+    target_link_libraries(rag_agent_lib PUBLIC absl::base absl::strings)
+endif()
+
+# Optional dependencies
+if(duckdb_FOUND)
+    target_link_libraries(rag_agent_lib PUBLIC duckdb::duckdb)
+endif()
+
+if(FAISS_AVAILABLE)
+    target_link_libraries(rag_agent_lib PUBLIC ${FAISS_LIB})
+endif()
 
 # Main executable
 add_executable(rag_agent_server
@@ -137,4 +155,3 @@ install(TARGETS rag_agent_server rag_agent_lib
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
-

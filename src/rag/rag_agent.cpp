@@ -20,22 +20,23 @@ RAGAgent::RAGAgent(std::shared_ptr<data::DataFetcher> data_fetcher,
       llm_api_key_(llm_api_key) {
 }
 
-std::vector<ContextDoc> RAGAgent::retrieveContext(const std::string& query, size_t k) {
-    std::vector<ContextDoc> context_docs;
+std::vector<RAGContextDoc> RAGAgent::retrieveContext(const std::string& query, size_t k) {
+    std::vector<RAGContextDoc> context_docs;
     
     // Generate embedding for query
     std::vector<float> query_embedding;
     if (!embedding_service_->generateEmbedding(query, query_embedding)) {
-        rag::utils::Logger::getInstance().error("Failed to generate query embedding");
+        rag::utils::Logger::getInstance().warning("Failed to generate query embedding - continuing without vector search context");
+        // Return empty context - the RAG will work without context
         return context_docs;
     }
     
     // Search FAISS index
     auto search_results = faiss_index_->search(query_embedding, k);
     
-    // Convert to ContextDoc
+    // Convert to RAGContextDoc
     for (const auto& result : search_results) {
-        ContextDoc doc;
+        RAGContextDoc doc;
         doc.doc_id = result.doc_id;
         doc.content = result.content;
         doc.source = result.source;
@@ -43,6 +44,12 @@ std::vector<ContextDoc> RAGAgent::retrieveContext(const std::string& query, size
         doc.similarity_score = result.similarity_score;
         doc.metadata = result.metadata;
         context_docs.push_back(doc);
+    }
+    
+    if (context_docs.empty()) {
+        rag::utils::Logger::getInstance().debug("No context documents retrieved from vector store");
+    } else {
+        rag::utils::Logger::getInstance().debug("Retrieved " + std::to_string(context_docs.size()) + " context documents");
     }
     
     return context_docs;
@@ -62,7 +69,8 @@ std::string RAGAgent::queryOpenAI(const std::string& prompt) {
     }
     
     nlohmann::json request_json;
-    request_json["model"] = "gpt-4";
+    // Using GPT-3.5-turbo for lower cost (change to "gpt-4" if you have quota)
+    request_json["model"] = "gpt-3.5-turbo";
     request_json["messages"] = nlohmann::json::array();
     request_json["messages"].push_back({{"role", "system"}, {"content", "You are a quantitative trading analyst assistant. Provide concise, data-driven insights based on the provided context."}});
     request_json["messages"].push_back({{"role", "user"}, {"content", prompt}});
@@ -95,89 +103,134 @@ std::string RAGAgent::queryOpenAI(const std::string& prompt) {
     
     try {
         nlohmann::json json_response = nlohmann::json::parse(response);
+        
+        // Check for API errors
+        if (json_response.contains("error")) {
+            std::string error_msg = json_response["error"].contains("message") 
+                ? json_response["error"]["message"].get<std::string>()
+                : "Unknown API error";
+            rag::utils::Logger::getInstance().error("OpenAI API error: " + error_msg);
+            
+            // Log error type if available
+            if (json_response["error"].contains("type")) {
+                std::string error_type = json_response["error"]["type"].get<std::string>();
+                rag::utils::Logger::getInstance().error("Error type: " + error_type);
+            }
+            
+            rag::utils::Logger::getInstance().debug("Full error response: " + response);
+            return "";
+        }
+        
         if (json_response.contains("choices") && json_response["choices"].is_array() &&
             !json_response["choices"].empty()) {
             return json_response["choices"][0]["message"]["content"].get<std::string>();
+        } else {
+            rag::utils::Logger::getInstance().error("Unexpected response format from OpenAI API");
+            rag::utils::Logger::getInstance().debug("Response: " + response.substr(0, 500));
         }
     } catch (const std::exception& e) {
         rag::utils::Logger::getInstance().error("Failed to parse LLM response: " + std::string(e.what()));
+        rag::utils::Logger::getInstance().debug("Response: " + response.substr(0, 500));
     }
     
     return "";
 }
 
-std::string RAGAgent::generateLLMResponse(const std::string& query,
-                                         const std::vector<ContextDoc>& context_docs) {
-    // Build prompt with context
+std::string RAGAgent::generateLLMResponse(const std::string& query, 
+                                         const std::vector<RAGContextDoc>& context_docs) {
+    // Build prompt with context (or without if no context available)
     std::stringstream prompt_ss;
     prompt_ss << "Query: " << query << "\n\n";
-    prompt_ss << "Context from financial data and news:\n";
     
-    for (size_t i = 0; i < context_docs.size(); ++i) {
-        prompt_ss << "\n[Document " << (i + 1) << "]\n";
-        prompt_ss << "Source: " << context_docs[i].source << "\n";
-        prompt_ss << "Timestamp: " << context_docs[i].timestamp << "\n";
-        prompt_ss << "Content: " << context_docs[i].content << "\n";
+    if (!context_docs.empty()) {
+        prompt_ss << "Context from financial data and news:\n";
+        for (size_t i = 0; i < context_docs.size(); ++i) {
+            prompt_ss << "\n[Document " << (i + 1) << "]\n";
+            prompt_ss << "Source: " << context_docs[i].source << "\n";
+            prompt_ss << "Timestamp: " << context_docs[i].timestamp << "\n";
+            prompt_ss << "Content: " << context_docs[i].content << "\n";
+        }
+        prompt_ss << "\n\nBased on the above context, please provide a comprehensive answer to the query.\n";
+    } else {
+        prompt_ss << "Please provide a comprehensive answer to the query based on your knowledge.\n";
+        rag::utils::Logger::getInstance().debug("Generating LLM response without context documents");
     }
-    
-    prompt_ss << "\n\nBased on the above context, please provide a comprehensive answer to the query.\n";
     
     return queryOpenAI(prompt_ss.str());
 }
 
 bool RAGAgent::getStockSummary(const std::string& symbol, const std::string& period,
-                              std::string& summary, std::vector<ContextDoc>& context_docs) {
+                              std::string& summary, std::vector<RAGContextDoc>& context_docs) {
     // Fetch current stock data
-    double price, change_percent;
-    if (!data_fetcher_->fetchRealTimeQuote(symbol, price, change_percent)) {
-        rag::utils::Logger::getInstance().error("Failed to fetch stock quote for " + symbol);
-        return false;
+    double price = 0.0, change_percent = 0.0;
+    bool has_price_data = data_fetcher_->fetchRealTimeQuote(symbol, price, change_percent);
+    
+    if (!has_price_data) {
+        rag::utils::Logger::getInstance().warning("Failed to fetch stock quote for " + symbol + " - continuing without price data");
+        // Continue without price data - can still generate summary from context
     }
     
-    // Retrieve relevant context
+    // Retrieve relevant context (may be empty if embeddings fail)
     std::string query = "Stock summary for " + symbol + " over " + period;
     context_docs = retrieveContext(query, 5);
     
-    // Build query with stock data
+    // Build query with available data
     std::stringstream query_ss;
     query_ss << "Provide a summary for " << symbol << " stock. ";
-    query_ss << "Current price: $" << price << " (" << change_percent << "%). ";
+    if (has_price_data) {
+        query_ss << "Current price: $" << price << " (" << change_percent << "%). ";
+    }
     query_ss << "Period: " << period << ". ";
     query_ss << "Include key metrics, recent news, and market sentiment.";
     
+    // Generate response (will work even without context)
     summary = generateLLMResponse(query_ss.str(), context_docs);
-    return !summary.empty();
-}
-
-bool RAGAgent::explainVolatility(const std::string& symbol, const std::string& date,
-                                 std::string& explanation, std::vector<ContextDoc>& context_docs) {
-    // Fetch volatility data
-    double volatility;
-    if (!data_fetcher_->fetchVolatility(symbol, date, volatility)) {
-        rag::utils::Logger::getInstance().error("Failed to fetch volatility for " + symbol);
+    
+    if (summary.empty()) {
+        rag::utils::Logger::getInstance().error("Failed to generate LLM response for stock summary");
         return false;
     }
     
-    // Retrieve relevant context (news, events around that date)
+    return true;
+}
+
+bool RAGAgent::explainVolatility(const std::string& symbol, const std::string& date,
+                                std::string& explanation, std::vector<RAGContextDoc>& context_docs) {
+    // Fetch volatility data
+    double volatility = 0.0;
+    bool has_volatility = data_fetcher_->fetchVolatility(symbol, date, volatility);
+    
+    if (!has_volatility) {
+        rag::utils::Logger::getInstance().warning("Failed to fetch volatility for " + symbol + " - generating explanation without volatility data");
+        // Continue without volatility data
+    }
+    
+    // Retrieve relevant context (may be empty if embeddings fail)
     std::string query = "Volatility spike " + symbol + " " + date;
     context_docs = retrieveContext(query, 10);
     
-    // Fetch news around that date
-    std::vector<data::NewsArticle> articles;
-    data_fetcher_->fetchNews(symbol, 10, articles);
-    
     // Build query
     std::stringstream query_ss;
-    query_ss << "Explain why " << symbol << " volatility was " << volatility;
-    query_ss << " on " << date << ". Consider news, events, and market conditions.";
+    query_ss << "Explain the volatility for " << symbol << " on " << date << ". ";
+    if (has_volatility) {
+        query_ss << "Volatility: " << volatility << ". ";
+    }
+    query_ss << "Provide context from recent news and market events.";
     
+    // Generate response (will work even without context or volatility data)
     explanation = generateLLMResponse(query_ss.str(), context_docs);
-    return !explanation.empty();
+    
+    if (explanation.empty()) {
+        rag::utils::Logger::getInstance().error("Failed to generate LLM response for volatility explanation");
+        return false;
+    }
+    
+    return true;
 }
 
 bool RAGAgent::compareSentiment(const std::string& ticker1, const std::string& ticker2,
-                                const std::string& period, std::string& comparison,
-                                std::vector<ContextDoc>& context_docs) {
+                               const std::string& period, std::string& comparison,
+                               std::vector<RAGContextDoc>& context_docs) {
     // Retrieve context for both tickers
     std::string query = "Sentiment comparison " + ticker1 + " " + ticker2 + " " + period;
     context_docs = retrieveContext(query, 10);
@@ -198,7 +251,7 @@ bool RAGAgent::compareSentiment(const std::string& ticker1, const std::string& t
 
 bool RAGAgent::recommendPair(const std::string& sector, std::string& long_ticker,
                             std::string& short_ticker, std::string& reasoning,
-                            std::vector<ContextDoc>& context_docs) {
+                            std::vector<RAGContextDoc>& context_docs) {
     // Retrieve context for sector
     std::string query = "Pair trading recommendation " + sector;
     context_docs = retrieveContext(query, 10);
@@ -221,13 +274,19 @@ bool RAGAgent::recommendPair(const std::string& sector, std::string& long_ticker
 }
 
 bool RAGAgent::queryRAG(const std::string& query, const std::vector<std::string>& symbols,
-                       std::string& answer, std::vector<ContextDoc>& context_docs) {
-    // Retrieve relevant context
+                       std::string& answer, std::vector<RAGContextDoc>& context_docs) {
+    // Retrieve relevant context (may be empty if embeddings fail)
     context_docs = retrieveContext(query, 10);
     
-    // Generate answer with context
+    // Generate answer with context (will work even without context)
     answer = generateLLMResponse(query, context_docs);
-    return !answer.empty();
+    
+    if (answer.empty()) {
+        rag::utils::Logger::getInstance().error("Failed to generate LLM response for RAG query");
+        return false;
+    }
+    
+    return true;
 }
 
 } // namespace agent

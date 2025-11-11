@@ -66,6 +66,17 @@ bool EmbeddingService::generateOpenAIEmbedding(const std::string& text, std::vec
     
     try {
         nlohmann::json json_response = nlohmann::json::parse(response);
+        
+        // Check for API errors
+        if (json_response.contains("error")) {
+            std::string error_msg = json_response["error"].contains("message") 
+                ? json_response["error"]["message"].get<std::string>()
+                : "Unknown API error";
+            rag::utils::Logger::getInstance().error("OpenAI API error: " + error_msg);
+            rag::utils::Logger::getInstance().debug("Full response: " + response);
+            return false;
+        }
+        
         if (json_response.contains("data") && json_response["data"].is_array() && 
             !json_response["data"].empty()) {
             auto embedding_data = json_response["data"][0]["embedding"];
@@ -74,10 +85,15 @@ bool EmbeddingService::generateOpenAIEmbedding(const std::string& text, std::vec
                 embedding.push_back(val.get<float>());
             }
             embedding_dimension_ = embedding.size();
+            rag::utils::Logger::getInstance().debug("Generated embedding with dimension: " + std::to_string(embedding_dimension_));
             return true;
+        } else {
+            rag::utils::Logger::getInstance().error("Unexpected response format from OpenAI API");
+            rag::utils::Logger::getInstance().debug("Response: " + response);
         }
     } catch (const std::exception& e) {
         rag::utils::Logger::getInstance().error("Failed to parse embedding response: " + std::string(e.what()));
+        rag::utils::Logger::getInstance().debug("Response: " + response);
     }
     
     return false;

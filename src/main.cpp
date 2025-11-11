@@ -47,8 +47,10 @@ int main(int argc, char** argv) {
         return 1;
     }
     
-    // Try to load existing index
-    faiss_index->load(faiss_index_path);
+    // Try to load existing index (non-critical if file doesn't exist)
+    if (!faiss_index->load(faiss_index_path)) {
+        rag::utils::Logger::getInstance().info("No existing FAISS index found. New index will be created when data is ingested.");
+    }
     
     // Create RAG agent
     auto rag_agent = std::make_shared<rag::agent::RAGAgent>(

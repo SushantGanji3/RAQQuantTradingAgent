@@ -120,20 +120,46 @@ bool DataFetcher::fetchRealTimeQuote(const std::string& symbol, double& price, d
     std::string response;
     
     if (!makeHttpRequest(url, response)) {
+        rag::utils::Logger::getInstance().error("HTTP request failed for quote: " + symbol);
         return false;
     }
     
     try {
         nlohmann::json json_data = nlohmann::json::parse(response);
         
-        if (json_data.contains("Global Quote")) {
+        // Check for API errors
+        if (json_data.contains("Error Message")) {
+            rag::utils::Logger::getInstance().error("Alpha Vantage API error: " + json_data["Error Message"].get<std::string>());
+            return false;
+        }
+        
+        if (json_data.contains("Note")) {
+            rag::utils::Logger::getInstance().warning("Alpha Vantage API rate limit: " + json_data["Note"].get<std::string>());
+            return false;
+        }
+        
+        if (json_data.contains("Global Quote") && !json_data["Global Quote"].empty()) {
             auto quote = json_data["Global Quote"];
-            price = std::stod(quote["05. price"].get<std::string>());
-            change_percent = std::stod(quote["10. change percent"].get<std::string>());
-            return true;
+            std::string price_str = quote.value("05. price", "");
+            std::string change_str = quote.value("10. change percent", "0%");
+            
+            if (!price_str.empty()) {
+                price = std::stod(price_str);
+                // Remove % sign and parse
+                if (!change_str.empty() && change_str.back() == '%') {
+                    change_str.pop_back();
+                }
+                change_percent = std::stod(change_str);
+                rag::utils::Logger::getInstance().debug("Fetched quote for " + symbol + ": $" + std::to_string(price));
+                return true;
+            }
+        } else {
+            rag::utils::Logger::getInstance().warning("No quote data in response for " + symbol);
+            rag::utils::Logger::getInstance().debug("Response: " + response.substr(0, 500));
         }
     } catch (const std::exception& e) {
         rag::utils::Logger::getInstance().error("Failed to parse quote JSON: " + std::string(e.what()));
+        rag::utils::Logger::getInstance().debug("Response: " + response.substr(0, 500));
     }
     
     return false;

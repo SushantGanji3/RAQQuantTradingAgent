@@ -1,13 +1,21 @@
 #include "vectorization/faiss_index.h"
 #include "utils/logger.h"
 #include <fstream>
+
+#ifndef NO_FAISS
 #include <faiss/utils.h>
+#endif
 
 namespace rag {
 namespace vectorization {
 
 FAISSIndex::FAISSIndex(size_t dimension) : dimension_(dimension) {
+#ifdef NO_FAISS
+    // Stub implementation when FAISS is not available
+    index_ = nullptr;
+#else
     index_ = std::make_unique<faiss::IndexFlatL2>(dimension);
+#endif
 }
 
 FAISSIndex::~FAISSIndex() {
@@ -19,7 +27,11 @@ bool FAISSIndex::initialize() {
         return false;
     }
     
+#ifdef NO_FAISS
+    rag::utils::Logger::getInstance().info("FAISS index initialized (stub mode) with dimension: " + std::to_string(dimension_));
+#else
     rag::utils::Logger::getInstance().info("FAISS index initialized with dimension: " + std::to_string(dimension_));
+#endif
     return true;
 }
 
@@ -29,8 +41,13 @@ bool FAISSIndex::addDocument(const Document& doc, const std::vector<float>& embe
         return false;
     }
     
+#ifdef NO_FAISS
+    // Stub implementation - just store metadata
+    rag::utils::Logger::getInstance().warning("FAISS not available - storing document metadata only");
+#else
     // Add to FAISS index
     index_->add(1, embedding.data());
+#endif
     
     // Store document metadata
     documents_[doc.doc_id] = doc;
@@ -47,6 +64,10 @@ bool FAISSIndex::addDocuments(const std::vector<Document>& docs,
         return false;
     }
     
+#ifdef NO_FAISS
+    // Stub implementation - just store metadata
+    rag::utils::Logger::getInstance().warning("FAISS not available - storing document metadata only");
+#else
     // Prepare batch embedding matrix
     std::vector<float> embedding_matrix;
     for (const auto& embedding : embeddings) {
@@ -59,6 +80,7 @@ bool FAISSIndex::addDocuments(const std::vector<Document>& docs,
     
     // Add to FAISS index
     index_->add(docs.size(), embedding_matrix.data());
+#endif
     
     // Store document metadata
     for (size_t i = 0; i < docs.size(); ++i) {
@@ -79,6 +101,11 @@ std::vector<SearchResult> FAISSIndex::search(const std::vector<float>& query_emb
         return results;
     }
     
+#ifdef NO_FAISS
+    // Stub implementation - return empty results or all documents
+    rag::utils::Logger::getInstance().warning("FAISS not available - returning empty search results");
+    return results;
+#else
     if (index_->ntotal == 0) {
         rag::utils::Logger::getInstance().warning("Index is empty, cannot search");
         return results;
@@ -112,6 +139,7 @@ std::vector<SearchResult> FAISSIndex::search(const std::vector<float>& query_emb
     }
     
     return results;
+#endif
 }
 
 bool FAISSIndex::removeDocument(const std::string& doc_id) {
@@ -137,8 +165,13 @@ bool FAISSIndex::getDocument(const std::string& doc_id, Document& doc) {
 
 bool FAISSIndex::save(const std::string& filepath) {
     try {
+#ifdef NO_FAISS
+        // Stub implementation - just save metadata
+        rag::utils::Logger::getInstance().warning("FAISS not available - saving metadata only");
+#else
         // Save FAISS index
         faiss::write_index(index_.get(), filepath.c_str());
+#endif
         
         // Save metadata to separate file
         std::string metadata_filepath = filepath + ".meta";
@@ -175,6 +208,10 @@ bool FAISSIndex::save(const std::string& filepath) {
 
 bool FAISSIndex::load(const std::string& filepath) {
     try {
+#ifdef NO_FAISS
+        // Stub implementation - just load metadata
+        rag::utils::Logger::getInstance().warning("FAISS not available - loading metadata only");
+#else
         // Load FAISS index
         faiss::Index* loaded_index = faiss::read_index(filepath.c_str());
         if (!loaded_index) {
@@ -188,12 +225,14 @@ bool FAISSIndex::load(const std::string& filepath) {
             delete loaded_index;
             return false;
         }
+#endif
         
         // Load metadata
         std::string metadata_filepath = filepath + ".meta";
         std::ifstream meta_file(metadata_filepath);
         if (!meta_file.is_open()) {
-            rag::utils::Logger::getInstance().error("Failed to open metadata file for reading");
+            // This is expected on first run when no index exists yet
+            rag::utils::Logger::getInstance().debug("Metadata file not found (this is normal on first run): " + metadata_filepath);
             return false;
         }
         
@@ -249,4 +288,3 @@ bool FAISSIndex::buildIndex() {
 
 } // namespace vectorization
 } // namespace rag
-
